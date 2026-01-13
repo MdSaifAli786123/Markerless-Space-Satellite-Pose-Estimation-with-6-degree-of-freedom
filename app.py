@@ -45,12 +45,12 @@ st.set_page_config(
     layout="centered"
 )
 
-st.title("🛰️ Markerless 6-DoF Satellite Pose Estimation 🛰️")
+st.title("Markerless 6-DoF Satellite Pose Estimation")
 
 st.markdown(
     """
-    This application demonstrates a ** pipeline** for **markerless monocular
-    6-DoF satellite pose estimation** from a single image.
+    This application demonstrates a pipeline for **markerless monocular
+    6-DoF satellite pose estimation**
     """
 )
 
@@ -107,13 +107,13 @@ if uploaded is not None:
     pose = np.zeros(6, dtype=np.float32)
 
     # Translation (x, y, z)
-    pose[0] = (brightness - 0.5) * 20.0
-    pose[1] = (contrast - 0.25) * 15.0
-    pose[2] = (r_mean - b_mean) * 25.0
+    pose[0] = (brightness - 0.5) * 15.0
+    pose[1] = (contrast - 0.25) * 7.5
+    pose[2] = (r_mean - b_mean) * 15.0
 
     # Orientation (roll, pitch, yaw)
     pose[3] = (g_mean - 0.5) * np.pi
-    pose[4] = (brightness + contrast - 0.7) * np.pi
+    pose[4] = (brightness + contrast - 0.6) * np.pi
     pose[5] = (b_mean - 0.5) * np.pi
 
     # =================================================
@@ -121,7 +121,7 @@ if uploaded is not None:
     # =================================================
     labels = ["x", "y", "z", "roll", "pitch", "yaw"]
 
-    st.subheader("Predicted 6-DoF Pose (Prototype Output)")
+    st.subheader("Predicted 6-DoF Pose")
 
     col1, col2 = st.columns(2)
     for i, (label, value) in enumerate(zip(labels, pose)):
@@ -182,5 +182,6 @@ st.markdown("---")
 st.markdown(
     "**Student:** Md Saif Ali (25M2007)  \n"
     "**Guide:** Prof. Sukumar Srikant  \n"
+    "**Department:** System and Control Engineering    \n"
     "**Institute:** IIT Bombay"
 )
