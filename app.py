@@ -84,7 +84,7 @@ plt.title("Distribution of Predicted Pose Components")
 plt.grid(True)
 plt.show()
 
-!pip install streamlit
+
 
 # Commented out IPython magic to ensure Python compatibility.
 # %%writefile app.py
