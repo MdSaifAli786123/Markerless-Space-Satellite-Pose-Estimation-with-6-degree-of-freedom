@@ -7,10 +7,11 @@ Original file is located at
     https://colab.research.google.com/drive/1kf-7cR3bYbRIo54-I9uOl0N2U_w8-xci
 """
 
-from google.colab import drive
-drive.mount('/content/drive')
+# ===============================
+# STREAMLIT DEPLOYMENT APP
+# ===============================
 
-import os
+import streamlit as st
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
@@ -18,6 +19,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 
+# -------------------------------
+# Model Definition
+# -------------------------------
 class PoseCNN(nn.Module):
     def __init__(self):
         super().__init__()
@@ -25,9 +29,8 @@ class PoseCNN(nn.Module):
             nn.Conv2d(3, 32, 5, stride=2), nn.ReLU(),
             nn.Conv2d(32, 64, 5, stride=2), nn.ReLU(),
             nn.Conv2d(64, 128, 5, stride=2), nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1,1))
+            nn.AdaptiveAvgPool2d((1, 1))
         )
-
         self.regressor = nn.Sequential(
             nn.Linear(128, 64), nn.ReLU(),
             nn.Linear(64, 6)
@@ -38,200 +41,56 @@ class PoseCNN(nn.Module):
         x = x.view(x.size(0), -1)
         return self.regressor(x)
 
-model_path = "/content/drive/MyDrive/satellite_pose_model/pose_model.pth"
+# -------------------------------
+# Page Config
+# -------------------------------
+st.set_page_config(page_title="Satellite Pose Estimation", layout="centered")
+st.title("🛰️ Markerless 6-DoF Satellite Pose Estimation")
 
-model = PoseCNN()
-model.load_state_dict(torch.load(model_path, map_location="cpu"))
-model.eval()
+# -------------------------------
+# Load Model (LOCAL FILE)
+# -------------------------------
+@st.cache_resource
+def load_model():
+    model = PoseCNN()
+    model.load_state_dict(torch.load("pose_model.pth", map_location="cpu"))
+    model.eval()
+    return model
 
-print("Model loaded successfully from Drive")
+model = load_model()
 
+# -------------------------------
+# Preprocessing
+# -------------------------------
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor()
 ])
 
-image_path = "/content/test/img000120real.jpg"  # Please replace 'your_image_file.jpg' with the actual name of an image file in your /content/test folder.
-image = Image.open(image_path).convert("RGB")
+# -------------------------------
+# Upload Image
+# -------------------------------
+uploaded = st.file_uploader("Upload spacecraft image", type=["jpg", "png", "jpeg"])
 
-plt.imshow(image)
-plt.axis("off")
-plt.title("Input Image")
-plt.show()
+if uploaded:
+    image = Image.open(uploaded).convert("RGB")
+    st.image(image, caption="Input Image", use_column_width=True)
 
-input_tensor = transform(image).unsqueeze(0)
+    x = transform(image).unsqueeze(0)
 
-with torch.no_grad():
-    prediction = model(input_tensor).squeeze().numpy()
+    with torch.no_grad():
+        pose = model(x).squeeze().numpy()
 
-labels = ["x", "y", "z", "roll", "pitch", "yaw"]
+    labels = ["x", "y", "z", "roll", "pitch", "yaw"]
 
-print("Predicted 6-DoF Pose:")
-for l, v in zip(labels, prediction):
-    print(f"{l}: {v:.4f}")
+    st.subheader("Predicted Pose Values")
+    for l, v in zip(labels, pose):
+        st.write(f"**{l}**: {v:.4f}")
 
-plt.figure()
-plt.bar(labels, prediction)
-plt.xlabel("Pose Components")
-plt.ylabel("Predicted Value")
-plt.title("Predicted 6-DoF Pose")
-plt.grid(True)
-plt.show()
+    fig, ax = plt.subplots()
+    ax.bar(labels, pose)
+    ax.set_title("6-DoF Pose Components")
+    st.pyplot(fig)
 
-plt.figure()
-plt.boxplot(predictions, labels=labels)
-plt.title("Distribution of Predicted Pose Components")
-plt.grid(True)
-plt.show()
-
-
-
-# Commented out IPython magic to ensure Python compatibility.
-# %%writefile app.py
-# import streamlit as st
-# import torch
-# import torch.nn as nn
-# import torchvision.transforms as transforms
-# from PIL import Image
-# import numpy as np
-# import matplotlib.pyplot as plt
-# 
-# # Define the PoseCNN class directly within this file
-# class PoseCNN(nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.features = nn.Sequential(
-#             nn.Conv2d(3, 32, 5, stride=2), nn.ReLU(),
-#             nn.Conv2d(32, 64, 5, stride=2), nn.ReLU(),
-#             nn.Conv2d(64, 128, 5, stride=2), nn.ReLU(),
-#             nn.AdaptiveAvgPool2d((1,1))
-#         )
-# 
-#         self.regressor = nn.Sequential(
-#             nn.Linear(128, 64), nn.ReLU(),
-#             nn.Linear(64, 6)
-#         )
-# 
-#     def forward(self, x):
-#         x = x.features(x)
-#         x = x.view(x.size(0), -1)
-#         return x.regressor(x)
-# 
-# # ----------------------------------------------------
-# # Page configuration
-# # ----------------------------------------------------
-# st.set_page_config(
-#     page_title="Satellite Pose Estimation",
-#     layout="centered",
-#     initial_sidebar_state="expanded"
-# )
-# 
-# st.title("🛰️ Satellite 6-DoF Pose Estimation")
-# st.markdown(
-#     """
-#     This application estimates the **relative 6-DoF pose**
-#     *(x, y, z, roll, pitch, yaw)* of a spacecraft from a single monocular image
-#     using a CNN-based regression model.
-#     """
-# )
-# 
-# # ----------------------------------------------------
-# # Load model (cached)
-# # ----------------------------------------------------
-# @st.cache_resource
-# def load_model():
-#     model = PoseCNN()
-#     model_path = "/content/drive/MyDrive/satellite_pose_model/pose_model.pth"
-#     model.load_state_dict(torch.load(model_path, map_location="cpu"))
-#     model.eval()
-#     return model
-# 
-# model = load_model()
-# 
-# # ----------------------------------------------------
-# # Image preprocessing
-# # ----------------------------------------------------
-# transform = transforms.Compose([
-#     transforms.Resize((224, 224)),
-#     transforms.ToTensor()
-# ])
-# 
-# # ----------------------------------------------------
-# # Sidebar controls
-# # ----------------------------------------------------
-# st.sidebar.header("Options")
-# show_norms = st.sidebar.checkbox("Show position & orientation norms", value=True)
-# show_bar = st.sidebar.checkbox("Show bar chart", value=True)
-# 
-# # ----------------------------------------------------
-# # Image upload
-# # ----------------------------------------------------
-# uploaded = st.file_uploader(
-#     "Upload a spacecraft image",
-#     type=["jpg", "jpeg", "png"]
-# )
-# 
-# if uploaded:
-#     image = Image.open(uploaded).convert("RGB")
-# 
-#     st.image(image, caption="Input Image", use_column_width=True)
-# 
-#     # ------------------------------------------------
-#     # Inference
-#     # ------------------------------------------------
-#     x = transform(image).unsqueeze(0)
-# 
-#     with torch.no_grad():
-#         pose = model(x).squeeze().numpy()
-# 
-#     labels = ["x", "y", "z", "roll", "pitch", "yaw"]
-# 
-#     # ------------------------------------------------
-#     # Numeric output
-#     # ------------------------------------------------
-#     st.subheader("Predicted 6-DoF Pose")
-# 
-#     col1, col2 = st.columns(2)
-#     for i, (l, v) in enumerate(zip(labels, pose)):
-#         (col1 if i < 3 else col2).metric(label=l, value=f"{v:.4f}")
-# 
-#     # ------------------------------------------------
-#     # Derived metrics (added feature)
-#     # ------------------------------------------------
-#     if show_norms:
-#         position_norm = np.linalg.norm(pose[:3])
-#         orientation_norm = np.linalg.norm(pose[3:])
-# 
-#         st.subheader("Derived Metrics")
-#         st.write(f"**Position norm (‖[x,y,z]‖):** {position_norm:.4f}")
-#         st.write(f"**Orientation norm (‖[roll,pitch,yaw]‖):** {orientation_norm:.4f}")
-# 
-#     # ------------------------------------------------
-#     # Visualization: bar chart
-#     # ------------------------------------------------
-#     if show_bar:
-#         st.subheader("Pose Component Visualization")
-# 
-#         fig, ax = plt.subplots()
-#         ax.bar(labels, pose)
-#         ax.set_xlabel("Pose Component")
-#         ax.set_ylabel("Predicted Value")
-#         ax.set_title("Predicted 6-DoF Pose Components")
-#         ax.grid(True)
-# 
-#         st.pyplot(fig)
-# 
-# else:
-#     st.info("Please upload a spacecraft image to run pose estimation.")
-# 
-# # ----------------------------------------------------
-# # Footer
-# # ----------------------------------------------------
-# st.markdown("---")
-# st.markdown(
-#     "**Note:** This is a static prototype using a CNN trained for monocular pose regression. "
-#     "Physics-accurate labels can be generated in future work using NVIDIA Omniverse."
-# )
-
-!streamlit run app.py & npx localtunnel --port 8501
-
+else:
+    st.info("Upload an image to run pose estimation.")
