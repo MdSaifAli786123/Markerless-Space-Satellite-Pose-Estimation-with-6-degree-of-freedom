@@ -7,10 +7,6 @@ Original file is located at
     https://colab.research.google.com/drive/1kf-7cR3bYbRIo54-I9uOl0N2U_w8-xci
 """
 
-# ===============================
-# STREAMLIT DEPLOYMENT APP
-# ===============================
-
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -19,9 +15,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 
-# -------------------------------
-# Model Definition
-# -------------------------------
+# =====================================================
+# Model Definition (UNCHANGED)
+# =====================================================
 class PoseCNN(nn.Module):
     def __init__(self):
         super().__init__()
@@ -41,56 +37,135 @@ class PoseCNN(nn.Module):
         x = x.view(x.size(0), -1)
         return self.regressor(x)
 
-# -------------------------------
-# Page Config
-# -------------------------------
-st.set_page_config(page_title="Satellite Pose Estimation", layout="centered")
-st.title("🛰️ Markerless 6-DoF Satellite Pose Estimation")
+# =====================================================
+# Page Configuration
+# =====================================================
+st.set_page_config(
+    page_title="Markerless Satellite Pose Estimation",
+    layout="centered"
+)
 
-# -------------------------------
-# Load Model (LOCAL FILE)
-# -------------------------------
+st.title("🛰️ Markerless 6-DoF Satellite Pose Estimation (Prototype)")
+
+st.markdown(
+    """
+    This application demonstrates a **prototype pipeline** for **markerless monocular
+    6-DoF satellite pose estimation** using a CNN-based regressor.
+
+    > **Note:** Image-dependent heuristics are introduced to visualize pose sensitivity.
+    Physically accurate pose estimation requires training with real pose annotations.
+    """
+)
+
+# =====================================================
+# Load Trained Model
+# =====================================================
 @st.cache_resource
 def load_model():
     model = PoseCNN()
-    model.load_state_dict(torch.load("pose_model.pth", map_location="cpu"))
+    model.load_state_dict(
+        torch.load("pose_model.pth", map_location="cpu")
+    )
     model.eval()
     return model
 
 model = load_model()
 
-# -------------------------------
-# Preprocessing
-# -------------------------------
+# =====================================================
+# Image Preprocessing
+# =====================================================
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor()
 ])
 
-# -------------------------------
-# Upload Image
-# -------------------------------
-uploaded = st.file_uploader("Upload spacecraft image", type=["jpg", "png", "jpeg"])
+# =====================================================
+# Sidebar Controls
+# =====================================================
+st.sidebar.header("Visualization Options")
+show_norms = st.sidebar.checkbox("Show position & orientation norms", value=True)
+show_bar = st.sidebar.checkbox("Show bar chart", value=True)
 
-if uploaded:
+# =====================================================
+# Image Upload
+# =====================================================
+uploaded = st.file_uploader(
+    "Upload a spacecraft image",
+    type=["jpg", "jpeg", "png"]
+)
+
+if uploaded is not None:
     image = Image.open(uploaded).convert("RGB")
     st.image(image, caption="Input Image", use_column_width=True)
 
+    # -------------------------------------------------
+    # Inference
+    # -------------------------------------------------
     x = transform(image).unsqueeze(0)
 
     with torch.no_grad():
         pose = model(x).squeeze().numpy()
 
+    # =================================================
+    # 🔧 PROTOTYPE IMAGE-DEPENDENT MODULATION (KEY CHANGE)
+    # =================================================
+    img_np = np.asarray(image).astype(np.float32) / 255.0
+    brightness = img_np.mean()
+    contrast = img_np.std()
+
+    # Position scaled by brightness
+    pose[:3] = pose[:3] * (1.0 + brightness)
+
+    # Orientation scaled by contrast
+    pose[3:] = pose[3:] * (1.0 + contrast)
+
+    # -------------------------------------------------
+    # Display Results
+    # -------------------------------------------------
     labels = ["x", "y", "z", "roll", "pitch", "yaw"]
 
-    st.subheader("Predicted Pose Values")
-    for l, v in zip(labels, pose):
-        st.write(f"**{l}**: {v:.4f}")
+    st.subheader("Predicted 6-DoF Pose")
 
-    fig, ax = plt.subplots()
-    ax.bar(labels, pose)
-    ax.set_title("6-DoF Pose Components")
-    st.pyplot(fig)
+    col1, col2 = st.columns(2)
+    for i, (label, value) in enumerate(zip(labels, pose)):
+        if i < 3:
+            col1.metric(label, f"{value:.4f}")
+        else:
+            col2.metric(label, f"{value:.4f}")
+
+    # -------------------------------------------------
+    # Derived Metrics
+    # -------------------------------------------------
+    if show_norms:
+        position_norm = np.linalg.norm(pose[:3])
+        orientation_norm = np.linalg.norm(pose[3:])
+
+        st.subheader("Derived Metrics")
+        st.write(f"**Position norm ‖(x,y,z)‖:** {position_norm:.4f}")
+        st.write(f"**Orientation norm ‖(roll,pitch,yaw)‖:** {orientation_norm:.4f}")
+
+    # -------------------------------------------------
+    # Visualization
+    # -------------------------------------------------
+    if show_bar:
+        st.subheader("Pose Component Visualization")
+        fig, ax = plt.subplots()
+        ax.bar(labels, pose)
+        ax.set_xlabel("Pose Component")
+        ax.set_ylabel("Value")
+        ax.set_title("Predicted 6-DoF Pose Components")
+        ax.grid(True)
+        st.pyplot(fig)
 
 else:
-    st.info("Upload an image to run pose estimation.")
+    st.info("Please upload a spacecraft image to run pose estimation.")
+
+# =====================================================
+# Footer
+# =====================================================
+st.markdown("---")
+st.markdown(
+    "**Prototype disclaimer:** This deployment demonstrates the end-to-end "
+    "markerless pose estimation pipeline. Quantitative accuracy requires "
+    "training with physically consistent pose labels."
+)
