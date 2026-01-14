@@ -107,19 +107,19 @@ if uploaded is not None:
     pose = np.zeros(6, dtype=np.float32)
 
     # Translation (x, y, z)
-    pose[0] = (brightness - 0.5) * 15.0
-    pose[1] = (contrast - 0.25) * 7.5
-    pose[2] = (r_mean - b_mean) * 15.0
+    pose[0] = (brightness - 0.3) * 10.0
+    pose[1] = (contrast - 0.25) * 8.5
+    pose[2] = (r_mean - b_mean+0.25) * 10.0
 
     # Orientation (roll, pitch, yaw)
-    pose[3] = (g_mean - 0.5) * np.pi
-    pose[4] = (brightness + contrast - 0.6) * np.pi
-    pose[5] = (b_mean - 0.5) * np.pi
+    pose[3] = (g_mean - 0.4) * np.pi
+    pose[4] = (brightness + contrast - 0.5) * np.pi
+    pose[5] = (b_mean - 0.4) * np.pi
 
     # =================================================
     # Display Results
     # =================================================
-    labels = ["x", "y", "z", "roll", "pitch", "yaw"]
+    labels = ["x-axis", "y-axis", "z-axis", "roll", "pitch", "yaw"]
 
     st.subheader("Predicted 6-DoF Pose")
 
