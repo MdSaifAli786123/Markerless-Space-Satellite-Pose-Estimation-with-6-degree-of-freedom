@@ -7,6 +7,7 @@ Original file is located at
     https://colab.research.google.com/drive/1-myLLhj5pJ0FhwB08uSyTfLQAMjPkT0A
 """
 
+
 import torch.nn as nn
 
 class PoseCNN(nn.Module):
