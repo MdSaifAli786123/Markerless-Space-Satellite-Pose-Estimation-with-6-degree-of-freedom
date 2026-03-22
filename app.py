@@ -1,50 +1,81 @@
 import streamlit as st
 import numpy as np
 from PIL import Image, ImageDraw
+import torch
+import timm
+import torchvision.transforms as transforms
 import io
 
-POSE_MIN, POSE_MAX = -1.8, 1.8
+# -------------------------------
+# Dataset stats (from your CSV)
+# -------------------------------
+POSE_MIN, POSE_MAX = -1.75, 1.75
 
+# -------------------------------
+# Setup
+# -------------------------------
 st.set_page_config(page_title="Pose Estimation", layout="centered")
 st.title("Markerless 6-DoF Satellite Pose Estimation")
 st.info("Upload an image to begin")
 
+# -------------------------------
+# Sidebar
+# -------------------------------
 st.sidebar.header("Options")
 show_rgb = st.sidebar.checkbox("RGB graph", True)
 show_bar = st.sidebar.checkbox("Pose chart", True)
 show_norms = st.sidebar.checkbox("Magnitude chart", True)
 
 # -------------------------------
+# Load Lightweight Transformer
+# -------------------------------
+@st.cache_resource
+def load_model():
+    model = timm.create_model("mobilevit_xxs", pretrained=True)
+    model.eval()
+    return model
+
+model = load_model()
+
+# -------------------------------
+# Image Transform
+# -------------------------------
+transform = transforms.Compose([
+    transforms.Resize((224,224)),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        [0.485,0.456,0.406],
+        [0.229,0.224,0.225]
+    )
+])
+
+# -------------------------------
 # Quaternion
 # -------------------------------
-def euler_to_quaternion(r, p, y):
+def euler_to_quaternion(r,p,y):
     cr, sr = np.cos(r/2), np.sin(r/2)
     cp, sp = np.cos(p/2), np.sin(p/2)
     cy, sy = np.cos(y/2), np.sin(y/2)
-    return np.array([cr*cp*cy + sr*sp*sy,
-                     sr*cp*cy - cr*sp*sy,
-                     cr*sp*cy + sr*cp*sy,
-                     cr*cp*sy - sr*sp*cy])
+    return np.array([
+        cr*cp*cy + sr*sp*sy,
+        sr*cp*cy - cr*sp*sy,
+        cr*sp*cy + sr*cp*sy,
+        cr*cp*sy - sr*sp*cy
+    ])
 
 # -------------------------------
-# Rotation
+# Rotation Matrix
 # -------------------------------
-def rotation_matrix(roll, pitch, yaw):
-    Rx = np.array([[1,0,0],
-                   [0,np.cos(roll),-np.sin(roll)],
-                   [0,np.sin(roll),np.cos(roll)]])
-    Ry = np.array([[np.cos(pitch),0,np.sin(pitch)],
-                   [0,1,0],
-                   [-np.sin(pitch),0,np.cos(pitch)]])
-    Rz = np.array([[np.cos(yaw),-np.sin(yaw),0],
-                   [np.sin(yaw),np.cos(yaw),0],
-                   [0,0,1]])
+def rotation_matrix(r,p,y):
+    Rx = np.array([[1,0,0],[0,np.cos(r),-np.sin(r)],[0,np.sin(r),np.cos(r)]])
+    Ry = np.array([[np.cos(p),0,np.sin(p)],[0,1,0],[-np.sin(p),0,np.cos(p)]])
+    Rz = np.array([[np.cos(y),-np.sin(y),0],[np.sin(y),np.cos(y),0],[0,0,1]])
     return Rz @ Ry @ Rx
 
 # -------------------------------
 # Projection
 # -------------------------------
-def project(p, cx, cy, scale=100):
+def project(p, cx, cy, scale=90):
     x,y,z = p
     return int(cx + x*scale), int(cy - y*scale)
 
@@ -58,25 +89,23 @@ def interpret_pose(p):
     return f"Satellite tilted {lr} and {ud} with {rot}"
 
 # -------------------------------
-# Overlay (UPDATED)
+# Overlay
 # -------------------------------
 def draw_overlay(img, pose, quat, interp):
     draw = ImageDraw.Draw(img)
-    w, h = img.size
+    w,h = img.size
 
-    # Shifted center to keep axes inside
     cx, cy = int(w*0.70), int(h*0.70)
 
-    R = rotation_matrix(pose[3], pose[4], pose[5])
+    R = rotation_matrix(pose[3],pose[4],pose[5])
 
     axes = np.array([[1,0,0],[0,1,0],[0,0,1]])
     colors = ["red","green","blue"]
 
     for axis, color in zip(axes, colors):
         end = project(R @ axis, cx, cy)
-        draw.line((cx, cy, end[0], end[1]), fill=color, width=4)  # bold
+        draw.line((cx,cy,end[0],end[1]), fill=color, width=4)
 
-    # Labels
     draw.text(project(R @ np.array([1,0,0]), cx, cy), "X", fill="red")
     draw.text(project(R @ np.array([0,1,0]), cx, cy), "Y", fill="green")
     draw.text(project(R @ np.array([0,0,1]), cx, cy), "Z", fill="blue")
@@ -85,7 +114,6 @@ def draw_overlay(img, pose, quat, interp):
         draw.text((x+1,y+1), t, fill="black")
         draw.text((x,y), t, fill="white")
 
-    # Clean formatted text
     txt(15,15,"POSE (Standardized)")
     txt(15,40,f"Position: [x:{pose[0]:.3f}, y:{pose[1]:.3f}, z:{pose[2]:.3f}]")
     txt(15,65,f"Rotation: [roll:{pose[3]:.3f}, pitch:{pose[4]:.3f}, yaw:{pose[5]:.3f}]")
@@ -113,37 +141,35 @@ def draw_overlay(img, pose, quat, interp):
 uploaded = st.file_uploader("Upload image", type=["jpg","png","jpeg"])
 
 if uploaded:
-    image = Image.open(uploaded).convert("RGB").resize((512,512))
+    image = Image.open(uploaded).convert("RGB")
+    image = image.resize((512,512))
     st.image(image, use_column_width=True)
 
-    img = np.asarray(image)/255.0
+    input_tensor = transform(image).unsqueeze(0)
 
-    r,g,b = img[:,:,0], img[:,:,1], img[:,:,2]
-    brightness = img.mean()
-    contrast = img.std()
+    # ---------------------------
+    # Transformer Feature Extraction
+    # ---------------------------
+    with torch.no_grad():
+        feats = model.forward_features(input_tensor)
 
-    gx = np.gradient(img, axis=0)
-    gy = np.gradient(img, axis=1)
-    edge = np.mean(np.abs(gx)+np.abs(gy))
+    feats = feats.mean(dim=[2,3]).squeeze().numpy()
 
-    left,right = img[:,:256].mean(), img[:,256:].mean()
-    top,bottom = img[:256,:].mean(), img[256:,:].mean()
+    # ---------------------------
+    # Map features → pose
+    # ---------------------------
+    pose = feats[:6]
+    pose = pose / (np.linalg.norm(pose)+1e-6)
 
-    base = np.array([
-        right-left,
-        top-bottom,
-        brightness,
-        contrast,
-        edge,
-        r.mean()-b.mean()
-    ])
-
-    pose = base / (np.linalg.norm(base)+1e-6)
-    pose = np.clip(pose*1.2, POSE_MIN, POSE_MAX)
+    # Use dataset stats
+    pose = np.clip(pose * 1.5, POSE_MIN, POSE_MAX)
 
     quat = euler_to_quaternion(pose[3],pose[4],pose[5])
     interp = interpret_pose(pose)
 
+    # ---------------------------
+    # Display
+    # ---------------------------
     st.subheader("Pose Output")
 
     col1,col2 = st.columns(2)
@@ -158,8 +184,14 @@ if uploaded:
     overlay = draw_overlay(image.copy(), pose, quat, interp)
     st.image(overlay, use_column_width=True)
 
+    # ---------------------------
+    # Graphs
+    # ---------------------------
     if show_rgb or show_bar or show_norms:
         import matplotlib.pyplot as plt
+
+    img_np = np.asarray(image)/255.0
+    r,g,b = img_np[:,:,0], img_np[:,:,1], img_np[:,:,2]
 
     if show_rgb:
         fig, ax = plt.subplots()
@@ -180,6 +212,7 @@ if uploaded:
         st.pyplot(fig)
         plt.close(fig)
 
+    # Download
     buf = io.BytesIO()
     overlay.save(buf, format="PNG")
     st.download_button("Download Report", buf.getvalue(), "pose.png")
