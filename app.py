@@ -5,8 +5,7 @@ import torchvision.transforms as transforms
 import torchvision.models as models
 import numpy as np
 import matplotlib.pyplot as plt
-from PIL import Image, ImageDraw
-import plotly.graph_objects as go
+from PIL import Image
 
 # -------------------------------
 # DATASET STATS (HARDCODED)
@@ -20,7 +19,7 @@ std_vals  = np.array([0.8, 0.9, 1.0, 0.7, 0.85, 0.9])
 st.set_page_config(page_title="6-DoF Pose Estimation", layout="centered")
 
 st.title("Markerless 6-DoF Satellite Pose Estimation")
-st.markdown("Final advanced demo with interactive visualization")
+st.markdown("Stable demo version (no external dependencies)")
 
 # -------------------------------
 # Device
@@ -32,7 +31,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # -------------------------------
 @st.cache_resource
 def load_backbone():
-    model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+    model = models.resnet18(pretrained=True)
     model.fc = nn.Identity()
     model.to(device)
     model.eval()
@@ -82,7 +81,6 @@ st.sidebar.header("Options")
 show_rgb = st.sidebar.checkbox("RGB graph", True)
 show_bar = st.sidebar.checkbox("Pose chart", True)
 show_norms = st.sidebar.checkbox("Magnitude chart", True)
-show_3d = st.sidebar.checkbox("Interactive 3D", True)
 
 # -------------------------------
 # Quaternion
@@ -100,41 +98,17 @@ def euler_to_quaternion(roll, pitch, yaw):
     ])
 
 # -------------------------------
-# 3D Plot (Plotly)
-# -------------------------------
-def plot_3d_axes(pose):
-    fig = go.Figure()
-
-    origin = [0,0,0]
-    axes = np.eye(3)
-
-    for i, axis in enumerate(axes):
-        fig.add_trace(go.Scatter3d(
-            x=[origin[0], axis[0]],
-            y=[origin[1], axis[1]],
-            z=[origin[2], axis[2]],
-            mode='lines',
-            name=["X","Y","Z"][i]
-        ))
-
-    fig.update_layout(
-        scene=dict(
-            xaxis_title='X',
-            yaxis_title='Y',
-            zaxis_title='Z'
-        ),
-        margin=dict(l=0,r=0,b=0,t=0)
-    )
-
-    return fig
-
-# -------------------------------
 # Upload
 # -------------------------------
 uploaded = st.file_uploader("Upload spacecraft image", type=["jpg","png","jpeg"])
 
 if uploaded:
-    image = Image.open(uploaded).convert("RGB")
+    try:
+        image = Image.open(uploaded).convert("RGB")
+    except:
+        st.error("Invalid image file")
+        st.stop()
+
     st.image(image, use_column_width=True)
 
     img_np = np.asarray(image)/255.0
@@ -147,9 +121,9 @@ if uploaded:
         raw_pose = pose_head(features).cpu().numpy().squeeze()
 
     # ---------------------------
-    # Scaling
+    # Stable Scaling
     # ---------------------------
-    pose = raw_pose / (np.std(raw_pose)+1e-6)
+    pose = raw_pose / (np.linalg.norm(raw_pose) + 1e-6)
     pose = pose * std_vals + mean_vals
 
     # ---------------------------
@@ -170,23 +144,18 @@ if uploaded:
     st.write("Quaternion:", np.round(quat,3))
 
     # Confidence
-    confidence = float(np.clip(1 - np.std(raw_pose), 0, 1))
+    confidence = float(np.clip(1 / (1 + np.linalg.norm(raw_pose)), 0, 1))
     st.progress(confidence)
     st.caption(f"Confidence: {confidence:.2f}")
-
-    # ---------------------------
-    # 3D Interactive
-    # ---------------------------
-    if show_3d:
-        st.subheader("Interactive 3D Pose")
-        st.plotly_chart(plot_3d_axes(pose))
 
     # ---------------------------
     # RGB Graph
     # ---------------------------
     if show_rgb:
+        st.subheader("RGB Distribution")
         fig, ax = plt.subplots()
         ax.bar(["R","G","B"], [r_mean,g_mean,b_mean])
+        ax.set_ylim(0,1)
         st.pyplot(fig)
         plt.close(fig)
 
@@ -194,6 +163,7 @@ if uploaded:
     # Pose Chart
     # ---------------------------
     if show_bar:
+        st.subheader("Pose Components")
         fig, ax = plt.subplots()
         ax.bar(labels, pose)
         ax.grid(True)
@@ -207,8 +177,10 @@ if uploaded:
         pos_norm = np.linalg.norm(pose[:3])
         ori_norm = np.linalg.norm(pose[3:])
 
+        st.subheader("Pose Magnitudes")
         fig, ax = plt.subplots()
         ax.bar(["Position","Orientation"], [pos_norm, ori_norm])
+        ax.grid(True)
         st.pyplot(fig)
         plt.close(fig)
 
