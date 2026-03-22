@@ -2,12 +2,12 @@ import streamlit as st
 import numpy as np
 from PIL import Image, ImageDraw
 import torch
-import timm
+import torchvision.models as models
 import torchvision.transforms as transforms
 import io
 
 # -------------------------------
-# Dataset stats (from your CSV)
+# Dataset stats
 # -------------------------------
 POSE_MIN, POSE_MAX = -1.75, 1.75
 
@@ -27,18 +27,19 @@ show_bar = st.sidebar.checkbox("Pose chart", True)
 show_norms = st.sidebar.checkbox("Magnitude chart", True)
 
 # -------------------------------
-# Load Lightweight Transformer
+# Load ResNet18 (FAST & STABLE)
 # -------------------------------
 @st.cache_resource
 def load_model():
-    model = timm.create_model("mobilevit_xxs", pretrained=True)
+    model = models.resnet18(pretrained=True)
+    model.fc = torch.nn.Identity()  # remove classifier
     model.eval()
     return model
 
 model = load_model()
 
 # -------------------------------
-# Image Transform
+# Transform
 # -------------------------------
 transform = transforms.Compose([
     transforms.Resize((224,224)),
@@ -64,7 +65,7 @@ def euler_to_quaternion(r,p,y):
     ])
 
 # -------------------------------
-# Rotation Matrix
+# Rotation matrix
 # -------------------------------
 def rotation_matrix(r,p,y):
     Rx = np.array([[1,0,0],[0,np.cos(r),-np.sin(r)],[0,np.sin(r),np.cos(r)]])
@@ -141,27 +142,24 @@ def draw_overlay(img, pose, quat, interp):
 uploaded = st.file_uploader("Upload image", type=["jpg","png","jpeg"])
 
 if uploaded:
-    image = Image.open(uploaded).convert("RGB")
-    image = image.resize((512,512))
+    image = Image.open(uploaded).convert("RGB").resize((512,512))
     st.image(image, use_column_width=True)
 
     input_tensor = transform(image).unsqueeze(0)
 
     # ---------------------------
-    # Transformer Feature Extraction
+    # Feature extraction (ML)
     # ---------------------------
     with torch.no_grad():
-        feats = model.forward_features(input_tensor)
+        feats = model(input_tensor)
 
-    feats = feats.mean(dim=[2,3]).squeeze().numpy()
+    feats = feats.squeeze().numpy()
 
     # ---------------------------
-    # Map features → pose
+    # Map to pose
     # ---------------------------
     pose = feats[:6]
     pose = pose / (np.linalg.norm(pose)+1e-6)
-
-    # Use dataset stats
     pose = np.clip(pose * 1.5, POSE_MIN, POSE_MAX)
 
     quat = euler_to_quaternion(pose[3],pose[4],pose[5])
@@ -212,7 +210,6 @@ if uploaded:
         st.pyplot(fig)
         plt.close(fig)
 
-    # Download
     buf = io.BytesIO()
     overlay.save(buf, format="PNG")
     st.download_button("Download Report", buf.getvalue(), "pose.png")
@@ -220,6 +217,7 @@ if uploaded:
 else:
     st.stop()
 
+# Footer
 st.markdown("---")
 st.markdown(
     "**Student:** Md Saif Ali (25M2007)\n"
