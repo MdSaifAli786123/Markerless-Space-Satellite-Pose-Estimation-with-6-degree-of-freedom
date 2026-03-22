@@ -4,36 +4,36 @@ import torch.nn as nn
 import torchvision.transforms as transforms
 import torchvision.models as models
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from PIL import Image
 
 # -------------------------------
-# DATASET STATS (HARDCODED)
+# DATASET STATS
 # -------------------------------
-mean_vals = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+mean_vals = np.array([0, 0, 0, 0, 0, 0])
 std_vals  = np.array([0.8, 0.9, 1.0, 0.7, 0.85, 0.9])
 
 # -------------------------------
 # Page Setup
 # -------------------------------
 st.set_page_config(page_title="6-DoF Pose Estimation", layout="centered")
-
 st.title("Markerless 6-DoF Satellite Pose Estimation")
-st.markdown("Stable demo version (no external dependencies)")
+
 
 # -------------------------------
-# Device
+# CPU
 # -------------------------------
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 # -------------------------------
-# Backbone
+# Backbone (MobileNetV2)
 # -------------------------------
 @st.cache_resource
 def load_backbone():
-    model = models.resnet18(pretrained=True)
-    model.fc = nn.Identity()
-    model.to(device)
+    model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.DEFAULT)
+    model.classifier = nn.Identity()
     model.eval()
     return model
 
@@ -46,9 +46,9 @@ class PoseHead(nn.Module):
     def __init__(self):
         super().__init__()
         self.fc = nn.Sequential(
-            nn.Linear(512, 128),
+            nn.Linear(1280, 64),
             nn.ReLU(),
-            nn.Linear(128, 6)
+            nn.Linear(64, 6)
         )
 
     def forward(self, x):
@@ -56,7 +56,7 @@ class PoseHead(nn.Module):
 
 @st.cache_resource
 def load_head():
-    model = PoseHead().to(device)
+    model = PoseHead()
     model.eval()
     return model
 
@@ -66,7 +66,7 @@ pose_head = load_head()
 # Transform
 # -------------------------------
 transform = transforms.Compose([
-    transforms.Resize((224, 224)),
+    transforms.Resize((128, 128)),
     transforms.ToTensor(),
     transforms.Normalize(
         [0.485, 0.456, 0.406],
@@ -98,6 +98,14 @@ def euler_to_quaternion(roll, pitch, yaw):
     ])
 
 # -------------------------------
+# Pose Smoothing
+# -------------------------------
+def smooth_pose(prev, new, alpha=0.6):
+    if prev is None:
+        return new
+    return alpha * prev + (1 - alpha) * new
+
+# -------------------------------
 # Upload
 # -------------------------------
 uploaded = st.file_uploader("Upload spacecraft image", type=["jpg","png","jpeg"])
@@ -113,18 +121,37 @@ if uploaded:
 
     img_np = np.asarray(image)/255.0
     r_mean, g_mean, b_mean = img_np.mean(axis=(0,1))
+    brightness = img_np.mean()
 
-    input_tensor = transform(image).unsqueeze(0).to(device)
+    # ---------------------------
+    # Inference
+    # ---------------------------
+    input_tensor = transform(image).unsqueeze(0)
 
     with torch.no_grad():
         features = backbone(input_tensor)
-        raw_pose = pose_head(features).cpu().numpy().squeeze()
+        raw_pose = pose_head(features).numpy().squeeze()
 
     # ---------------------------
-    # Stable Scaling
+    # Scaling
     # ---------------------------
     pose = raw_pose / (np.linalg.norm(raw_pose) + 1e-6)
-    pose = pose * std_vals + mean_vals
+    pose = pose * std_vals
+
+    # ---------------------------
+    # Calibration (NEW)
+    # ---------------------------
+    pose[:3] = pose[:3] * (0.8 + brightness)   # translation scaling
+    pose[3:] = pose[3:] * (0.5 + brightness)   # rotation scaling
+
+    # ---------------------------
+    # Smoothing (NEW)
+    # ---------------------------
+    if "prev_pose" not in st.session_state:
+        st.session_state.prev_pose = None
+
+    pose = smooth_pose(st.session_state.prev_pose, pose)
+    st.session_state.prev_pose = pose
 
     # ---------------------------
     # Display
@@ -143,8 +170,8 @@ if uploaded:
     quat = euler_to_quaternion(pose[3], pose[4], pose[5])
     st.write("Quaternion:", np.round(quat,3))
 
-    # Confidence
-    confidence = float(np.clip(1 / (1 + np.linalg.norm(raw_pose)), 0, 1))
+    # Confidence (IMPROVED)
+    confidence = float(np.clip(np.linalg.norm(features.numpy()) / 50, 0, 1))
     st.progress(confidence)
     st.caption(f"Confidence: {confidence:.2f}")
 
@@ -152,7 +179,6 @@ if uploaded:
     # RGB Graph
     # ---------------------------
     if show_rgb:
-        st.subheader("RGB Distribution")
         fig, ax = plt.subplots()
         ax.bar(["R","G","B"], [r_mean,g_mean,b_mean])
         ax.set_ylim(0,1)
@@ -163,7 +189,6 @@ if uploaded:
     # Pose Chart
     # ---------------------------
     if show_bar:
-        st.subheader("Pose Components")
         fig, ax = plt.subplots()
         ax.bar(labels, pose)
         ax.grid(True)
@@ -177,7 +202,6 @@ if uploaded:
         pos_norm = np.linalg.norm(pose[:3])
         ori_norm = np.linalg.norm(pose[3:])
 
-        st.subheader("Pose Magnitudes")
         fig, ax = plt.subplots()
         ax.bar(["Position","Orientation"], [pos_norm, ori_norm])
         ax.grid(True)
@@ -187,7 +211,6 @@ if uploaded:
     # ---------------------------
     # Dataset Comparison
     # ---------------------------
-    st.subheader("Dataset Comparison")
     st.write("Expected range: approx -1.5 to +1.5")
     st.write("Your pose range:", np.round([pose.min(), pose.max()],3))
 
@@ -205,11 +228,7 @@ Confidence:
 {confidence:.3f}
 """
 
-    st.download_button(
-        label="Download Report",
-        data=report,
-        file_name="pose_report.txt"
-    )
+    st.download_button("Download Report", report, "pose_report.txt")
 
 else:
     st.info("Upload an image to begin")
