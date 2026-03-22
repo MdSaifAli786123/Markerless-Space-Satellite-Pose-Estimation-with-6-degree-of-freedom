@@ -1,6 +1,7 @@
 streamlit
-torch
-torchvision
 numpy
 pillow
+torch
+timm
+torchvision
 matplotlib
