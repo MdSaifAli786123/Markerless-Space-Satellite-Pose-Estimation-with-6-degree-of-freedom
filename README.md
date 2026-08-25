@@ -1,6 +1,6 @@
 This is a static model
 App link: https://markerless-space-satellite-pose.onrender.com
-
+(Since it's a free platform, it will take time to show when clicking the link)
 
 Note:
 The following code/files are for demo purposes because the actual model gets too large to be deployed and hosted on a free server
